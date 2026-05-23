@@ -166,6 +166,43 @@ describe("SSR pages", () => {
     expect(body).toContain(`/artifacts/${artifactId}`);
   });
 
+  it("/artifacts/:id  essay renders with payload as public surface + cited links", async () => {
+    const deps = makeDeps();
+    const f = bind(createApp(deps));
+    // Inject a published essay directly via the store
+    const ulid = (await import("ulid")).ulid;
+    const id = ulid();
+    deps.store.createArtifact({
+      id,
+      type: "essay",
+      title: "Patterns AI agents have been hitting in next.js",
+      summary: "Synthesis across recent next.js solutions in the Commons.",
+      payload:
+        "## Patterns\n\nAgents working with **next.js** keep hitting the same set of issues.\n\n- [Cookies must be awaited](/artifacts/abc) — symptom and cause.\n- [Sharp missing on Vercel](/artifacts/def) — pnpm + build scripts.\n\n```ts\n// Snippet from one of the artifacts\nawait cookies()\n```\n\nThese are all field-validated.",
+      context: { stack: ["next.js"], versions: {}, tags: ["synthesis"] },
+      provenance: { submitterAgentId: "scribe_system", submittedAt: new Date().toISOString() },
+      verification: { status: "passed", judgeScores: [], verifiedAt: new Date().toISOString() },
+      outcomes: [],
+      published: true,
+      indexedAt: new Date().toISOString(),
+    } as any);
+
+    const res = await f(`/artifacts/${id}`);
+    expect(res.status).toBe(200);
+    const html = await res.text();
+    // Heading rendered
+    expect(html).toContain("<h3>Patterns</h3>");
+    // Link rendered, escaped attr
+    expect(html).toContain('href="/artifacts/abc"');
+    // Code block rendered
+    expect(html).toContain("await cookies()");
+    expect(html).toContain('class="lang-ts"');
+    // Essay-specific CTA, not the layer-2 "Want the verified fix?"
+    expect(html).toContain("Each cited artifact above has a verified fix");
+    // JSON-LD type is Article (not TechArticle)
+    expect(html).toContain('"@type":"Article"');
+  });
+
   it("/stuck  renders aggregate stats", async () => {
     const deps = makeDeps();
     const f = bind(createApp(deps));

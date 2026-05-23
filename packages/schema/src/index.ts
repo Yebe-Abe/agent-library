@@ -235,8 +235,18 @@ export const Job = z.object({
   id: z.string(),
   agentId: z.string(),
   artifactId: z.string(),
-  kind: z.enum(["stage2_verification"]),
-  status: z.enum(["pending", "passed", "failed"]),
+  kind: z.enum(["stage2_verification", "scribe_draft"]),
+  /**
+   * stage2_verification: pending → passed | failed
+   * scribe_draft:        pending → approved | rejected
+   */
+  status: z.enum([
+    "pending",
+    "passed",
+    "failed",
+    "approved",
+    "rejected",
+  ]),
   reason: z.string().optional(),
   details: z.string().optional(),
   createdAt: z.string(),

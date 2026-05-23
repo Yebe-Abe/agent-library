@@ -319,6 +319,12 @@ function renderArtifactStub(baseUrl: string, art: Artifact): string {
 }
 
 function renderArtifactFull(baseUrl: string, art: Artifact): string {
+  // Essays are layer-3 content — the payload IS the public surface.
+  // Other artifact types show publicPreview only; payload stays credit-gated.
+  if (art.type === "essay") {
+    return renderEssayFull(baseUrl, art);
+  }
+
   const helped = art.outcomes.filter((o) => o.helped).length;
   const total = art.outcomes.length;
   const preview = art.publicPreview ?? art.summary;
@@ -363,6 +369,49 @@ ${renderMarkdownProse(preview)}
       description: art.summary,
       datePublished: art.provenance.submittedAt,
       dateModified: art.indexedAt ?? art.provenance.submittedAt,
+      author: { "@type": "Organization", name: "The Agent Commons" },
+      about: art.context.stack,
+      url: `${baseUrl}/artifacts/${art.id}`,
+    },
+  });
+}
+
+function renderEssayFull(baseUrl: string, art: Artifact): string {
+  const publishedAt = art.verification.verifiedAt
+    ? new Date(art.verification.verifiedAt).toISOString().slice(0, 10)
+    : "(unknown)";
+
+  const body = `
+<p class="faint"><a href="/">← Commons</a> &middot; essay</p>
+<h1>${escapeHtml(art.title)}</h1>
+<div class="meta" style="margin: 12px 0 28px;">
+  ${art.context.stack.map((s) => `<span class="pill">${escapeHtml(s)}</span>`).join("")}
+  &middot; published ${escapeHtml(publishedAt)}
+</div>
+
+<p class="muted">${escapeHtml(art.summary)}</p>
+
+${renderEssayBody(art.payload)}
+
+<div class="cta">
+  <strong>Each cited artifact above has a verified fix.</strong>
+  <p style="margin: 0 0 8px;">The runnable fixes live behind the Commons SDK (1 credit per fetch):</p>
+  <pre><code>pnpm add @commons/agent</code></pre>
+  <p class="faint" style="margin: 8px 0 0;">Or wire up the MCP server — see <a href="/llms.txt">/llms.txt</a>.</p>
+</div>
+`;
+  return htmlShell({
+    title: `${art.title} — Commons`,
+    description: art.summary,
+    canonical: `${baseUrl}/artifacts/${art.id}`,
+    ogType: "article",
+    body,
+    jsonLd: {
+      "@context": "https://schema.org",
+      "@type": "Article",
+      headline: art.title,
+      description: art.summary,
+      datePublished: art.indexedAt ?? art.provenance.submittedAt,
       author: { "@type": "Organization", name: "The Agent Commons" },
       about: art.context.stack,
       url: `${baseUrl}/artifacts/${art.id}`,
@@ -508,6 +557,72 @@ function renderMarkdownProse(text: string): string {
     .split(/\n\s*\n/)
     .map((p) => `<p>${escapeHtml(p.trim())}</p>`)
     .join("\n");
+}
+
+/**
+ * Render essay payload — supports headings (##, ###), paragraphs, lists, and
+ * [text](/path) links. NOT a full markdown renderer; deliberately narrow so
+ * essays can't smuggle in HTML or attempt XSS via unexpected constructs.
+ *
+ * Code blocks ARE rendered (essays may cite snippets) but not executed.
+ */
+function renderEssayBody(text: string): string {
+  // Split into blocks separated by blank lines
+  const blocks = text.split(/\n\s*\n/);
+  const parts: string[] = [];
+  for (const raw of blocks) {
+    const block = raw.trimEnd();
+    if (!block) continue;
+    // Fenced code block
+    if (block.startsWith("```")) {
+      const m = block.match(/^```(\w+)?\n([\s\S]*?)\n?```/);
+      if (m) {
+        const lang = m[1] ?? "";
+        parts.push(
+          `<pre><code class="lang-${escapeHtmlAttr(lang)}">${escapeHtml(m[2])}</code></pre>`,
+        );
+        continue;
+      }
+    }
+    // Heading
+    const h = /^(#{1,3})\s+(.+)$/.exec(block);
+    if (h) {
+      const level = h[1].length + 1; // ## → h3, # → h2
+      parts.push(`<h${level}>${renderInline(h[2])}</h${level}>`);
+      continue;
+    }
+    // List (every line starts with "- " or "* ")
+    if (block.split("\n").every((l) => /^[-*]\s+/.test(l))) {
+      const items = block
+        .split("\n")
+        .map((l) => `  <li>${renderInline(l.replace(/^[-*]\s+/, ""))}</li>`)
+        .join("\n");
+      parts.push(`<ul>\n${items}\n</ul>`);
+      continue;
+    }
+    // Paragraph
+    parts.push(`<p>${renderInline(block)}</p>`);
+  }
+  return parts.join("\n");
+}
+
+/**
+ * Inline markdown subset: links and code spans.
+ * Pattern is: escape everything, then promote a controlled subset back.
+ */
+function renderInline(text: string): string {
+  let out = escapeHtml(text);
+  // [label](path) — only allow same-origin /paths or http(s) URLs
+  out = out.replace(
+    /\[([^\]]+)\]\(([^)\s]+)\)/g,
+    (_match, label: string, href: string) => {
+      if (!/^(\/|https?:)/.test(href)) return label;
+      return `<a href="${escapeHtmlAttr(href)}">${label}</a>`;
+    },
+  );
+  // `code`
+  out = out.replace(/`([^`]+)`/g, "<code>$1</code>");
+  return out;
 }
 
 // ─── Escape helpers ──────────────────────────────────────────────────────────

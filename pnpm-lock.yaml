@@ -26,6 +26,9 @@ importers:
       '@commons/schema':
         specifier: workspace:*
         version: link:../../packages/schema
+      '@commons/scribe':
+        specifier: workspace:*
+        version: link:../../packages/scribe
       '@commons/verifier':
         specifier: workspace:*
         version: link:../../packages/verifier
@@ -95,6 +98,25 @@ importers:
         specifier: ^3.23.8
         version: 3.25.76
     devDependencies:
+      typescript:
+        specifier: ^5.5.4
+        version: 5.9.3
+      vitest:
+        specifier: ^2.0.5
+        version: 2.1.9(@types/node@20.19.41)
+
+  packages/scribe:
+    dependencies:
+      '@commons/schema':
+        specifier: workspace:*
+        version: link:../schema
+      openai:
+        specifier: ^4.67.0
+        version: 4.104.0(zod@3.25.76)
+    devDependencies:
+      '@types/node':
+        specifier: ^20.14.10
+        version: 20.19.41
       typescript:
         specifier: ^5.5.4
         version: 5.9.3

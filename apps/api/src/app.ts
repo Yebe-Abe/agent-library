@@ -37,6 +37,7 @@ import {
   stage2FullVerification,
 } from "@commons/verifier";
 import { hashToken, mintToken, parseBearer } from "./auth.js";
+import { mountAdmin } from "./admin.js";
 import { credit } from "./credits.js";
 import { mountPages } from "./pages.js";
 import { search } from "./search.js";
@@ -85,6 +86,9 @@ export function createApp(deps: AppDeps = defaultDeps()) {
     store,
     publicBaseUrl: process.env.PUBLIC_BASE_URL ?? "http://localhost:3001",
   });
+
+  // Admin endpoints (gated by ADMIN_TOKEN env var)
+  mountAdmin(app, { store, now });
 
   // ── Middleware ─────────────────────────────────────────────────────────────
 

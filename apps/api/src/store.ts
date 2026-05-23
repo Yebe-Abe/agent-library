@@ -34,6 +34,7 @@ export interface Store {
   createJob(job: Job): void;
   getJob(id: string): Job | undefined;
   updateJob(id: string, patch: Partial<Job>): Job | undefined;
+  allJobs(filter?: { kind?: Job["kind"]; status?: Job["status"] }): Job[];
 
   // outcomes
   appendOutcome(artifactId: string, outcome: Outcome): void;
@@ -112,6 +113,12 @@ export function createMemoryStore(): Store {
       const next = { ...cur, ...patch };
       jobs.set(id, next);
       return next;
+    },
+    allJobs(filter) {
+      let xs = Array.from(jobs.values());
+      if (filter?.kind) xs = xs.filter((j) => j.kind === filter.kind);
+      if (filter?.status) xs = xs.filter((j) => j.status === filter.status);
+      return xs;
     },
 
     appendOutcome(artifactId, outcome) {
