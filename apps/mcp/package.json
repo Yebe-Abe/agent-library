@@ -1,0 +1,30 @@
+{
+  "name": "@commons/mcp",
+  "version": "0.0.1",
+  "type": "module",
+  "private": true,
+  "bin": {
+    "commons-mcp": "./src/server.ts"
+  },
+  "main": "./src/server.ts",
+  "scripts": {
+    "dev": "tsx src/server.ts",
+    "start": "tsx src/server.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@commons/agent": "workspace:*",
+    "@commons/schema": "workspace:*",
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@commons/api": "workspace:*",
+    "@hono/node-server": "^1.13.1",
+    "@types/node": "^20.14.10",
+    "tsx": "^4.19.0",
+    "typescript": "^5.5.4",
+    "vitest": "^2.0.5"
+  }
+}

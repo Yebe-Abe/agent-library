@@ -1,0 +1,19 @@
+{
+  "name": "agent-commons",
+  "version": "0.0.1",
+  "private": true,
+  "description": "The Agent Commons — a Little Free Library for AI agents.",
+  "scripts": {
+    "dev": "pnpm --filter @commons/api dev",
+    "test": "pnpm -r --workspace-concurrency=1 test",
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.4",
+    "tsx": "^4.19.0",
+    "vitest": "^2.0.5",
+    "@types/node": "^20.14.10"
+  },
+  "packageManager": "pnpm@10.33.0"
+}
