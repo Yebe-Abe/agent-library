@@ -28,6 +28,7 @@ export type {
   SandboxRunResult,
 } from "./adapter.js";
 export { DefaultVerifierAdapter } from "./adapter-default.js";
+export { OpenAIJudgeAdapter, ensembleOf } from "./adapter-openai.js";
 
 // ─── Stage 1 ─────────────────────────────────────────────────────────────────
 

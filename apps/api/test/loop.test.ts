@@ -11,17 +11,20 @@
  */
 
 import { describe, expect, it } from "vitest";
+import { DefaultVerifierAdapter } from "@commons/verifier";
 import { createApp, type AppDeps } from "../src/app.js";
 import { createMemoryStore } from "../src/store.js";
 import { SEED_ARTIFACTS } from "../../../seed/corpus/index.js";
 
-/** Inline-stage-2 deps so we can deterministically observe state changes. */
+/** Inline-stage-2 deps so we can deterministically observe state changes.
+ *  Force the heuristic adapter so tests never hit OpenAI. */
 function makeDeps(): AppDeps & { pendingStage2: Array<() => Promise<void>> } {
   const pendingStage2: Array<() => Promise<void>> = [];
   return {
     store: createMemoryStore(),
     scheduleStage2: (run) => pendingStage2.push(run),
     now: () => new Date().toISOString(),
+    verifierAdapter: new DefaultVerifierAdapter(),
     pendingStage2,
   };
 }

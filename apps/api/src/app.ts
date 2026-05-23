@@ -29,9 +29,16 @@ import {
   INDEX_THRESHOLDS,
   type Job,
 } from "@commons/schema";
-import { stage1FastVet, stage2FullVerification } from "@commons/verifier";
+import {
+  DefaultVerifierAdapter,
+  OpenAIJudgeAdapter,
+  type VerifierAdapter,
+  stage1FastVet,
+  stage2FullVerification,
+} from "@commons/verifier";
 import { hashToken, mintToken, parseBearer } from "./auth.js";
 import { credit } from "./credits.js";
+import { mountPages } from "./pages.js";
 import { search } from "./search.js";
 import { type Store, createMemoryStore } from "./store.js";
 
@@ -40,9 +47,19 @@ export interface AppDeps {
   /** seam for tests so they can run stage 2 inline instead of via setImmediate */
   scheduleStage2: (run: () => Promise<void>) => void;
   now: () => string;
+  /**
+   * Verifier adapter. Defaults to OpenAI judge when OPENAI_API_KEY is set
+   * (with the heuristic adapter providing slop/dedup/sandbox), else fully
+   * heuristic. Tests inject DefaultVerifierAdapter explicitly for determinism.
+   */
+  verifierAdapter: VerifierAdapter;
 }
 
 export function defaultDeps(): AppDeps {
+  const hasOpenAI = !!process.env.OPENAI_API_KEY;
+  const verifierAdapter: VerifierAdapter = hasOpenAI
+    ? new OpenAIJudgeAdapter()
+    : new DefaultVerifierAdapter();
   return {
     store: createMemoryStore(),
     scheduleStage2: (run) => {
@@ -54,12 +71,20 @@ export function defaultDeps(): AppDeps {
       });
     },
     now: () => new Date().toISOString(),
+    verifierAdapter,
   };
 }
 
 export function createApp(deps: AppDeps = defaultDeps()) {
-  const { store, scheduleStage2, now } = deps;
+  const { store, scheduleStage2, now, verifierAdapter } = deps;
   const app = new Hono();
+
+  // Server-rendered HTML pages on the same Hono app. The /v1/* routes below
+  // are the JSON API; everything else is the human surface.
+  mountPages(app, {
+    store,
+    publicBaseUrl: process.env.PUBLIC_BASE_URL ?? "http://localhost:3001",
+  });
 
   // ── Middleware ─────────────────────────────────────────────────────────────
 
@@ -129,7 +154,7 @@ export function createApp(deps: AppDeps = defaultDeps()) {
     }
 
     // Stage 1 — fast vet
-    const s1 = await stage1FastVet(contribution, store.corpusForDedup());
+    const s1 = await stage1FastVet(contribution, store.corpusForDedup(), verifierAdapter);
     if (!s1.passed) {
       return c.json(
         {
@@ -373,7 +398,7 @@ export function createApp(deps: AppDeps = defaultDeps()) {
     }
     const contribution = parsed.data;
 
-    const s1 = await stage1FastVet(contribution, store.corpusForDedup());
+    const s1 = await stage1FastVet(contribution, store.corpusForDedup(), verifierAdapter);
     if (!s1.passed) {
       return c.json(
         { status: "rejected_stage1", reason: s1.reason, details: s1.details },
@@ -569,7 +594,7 @@ async function runStage2(
   contribution: ContributionInput,
   preliminaryScore: number,
 ): Promise<void> {
-  const { store, now } = deps;
+  const { store, now, verifierAdapter } = deps;
   const job = store.getJob(jobId);
   if (!job) return;
   const agent = store.getAgent(job.agentId);
@@ -577,7 +602,7 @@ async function runStage2(
   const artifact = store.getArtifact(job.artifactId);
   if (!artifact) return;
 
-  const result = await stage2FullVerification(contribution, preliminaryScore);
+  const result = await stage2FullVerification(contribution, preliminaryScore, verifierAdapter);
 
   if (result.passed) {
     // Mint reward, publish artifact, mark agent active.
