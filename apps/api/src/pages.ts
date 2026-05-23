@@ -30,25 +30,24 @@ export function mountPages(app: Hono, deps: PageDeps): void {
   });
 
   // ── sitemap.xml ────────────────────────────────────────────────────────────
-  app.get("/sitemap.xml", (c) => {
-    const indexed = store
-      .allArtifacts()
-      .filter((a) => a.published && !!a.indexedAt);
+  app.get("/sitemap.xml", async (c) => {
+    const all = await store.allArtifacts();
+    const indexed = all.filter((a) => a.published && !!a.indexedAt);
     c.header("Content-Type", "application/xml; charset=utf-8");
     c.header("Cache-Control", "public, max-age=600");
     return c.body(renderSitemap(publicBaseUrl, indexed));
   });
 
   // ── /  (landing) ───────────────────────────────────────────────────────────
-  app.get("/", (c) => {
-    const stats = computeStats(store);
+  app.get("/", async (c) => {
+    const stats = await computeStats(store);
     c.header("Content-Type", "text/html; charset=utf-8");
     return c.body(renderLanding(publicBaseUrl, stats));
   });
 
   // ── /artifacts/:id  (layer-2 HTML view) ────────────────────────────────────
-  app.get("/artifacts/:id", (c) => {
-    const art = store.getArtifact(c.req.param("id"));
+  app.get("/artifacts/:id", async (c) => {
+    const art = await store.getArtifact(c.req.param("id"));
     c.header("Content-Type", "text/html; charset=utf-8");
     if (!art || !art.published) {
       c.status(404);
@@ -68,8 +67,8 @@ export function mountPages(app: Hono, deps: PageDeps): void {
   // ── /stuck  (live "what agents are searching for") ─────────────────────────
   // For v0 we render aggregate counts since we don't have a query log yet.
   // When the query log lands, this page becomes the viral artifact.
-  app.get("/stuck", (c) => {
-    const stats = computeStats(store);
+  app.get("/stuck", async (c) => {
+    const stats = await computeStats(store);
     c.header("Content-Type", "text/html; charset=utf-8");
     return c.body(renderStuck(publicBaseUrl, stats));
   });
@@ -84,8 +83,9 @@ interface Stats {
   recentIndexed: Array<{ id: string; title: string; stack: string[]; helped: number; total: number }>;
 }
 
-function computeStats(store: Store): Stats {
-  const arts = store.allArtifacts().filter((a) => a.published);
+async function computeStats(store: Store): Promise<Stats> {
+  const all = await store.allArtifacts();
+  const arts = all.filter((a) => a.published);
   const indexed = arts.filter((a) => !!a.indexedAt);
   const stackCounts = new Map<string, number>();
   for (const a of arts) {

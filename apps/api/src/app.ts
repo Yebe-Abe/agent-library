@@ -99,7 +99,7 @@ export function createApp(deps: AppDeps = defaultDeps()) {
   async function authed(c: any): Promise<Agent | null> {
     const token = parseBearer(c.req.header("Authorization"));
     if (!token) return null;
-    const agent = store.getAgentByTokenHash(hashToken(token));
+    const agent = await store.getAgentByTokenHash(hashToken(token));
     if (!agent) return null;
     // Set the bootstrap-status header now so it's present on every response
     const status =
@@ -141,7 +141,7 @@ export function createApp(deps: AppDeps = defaultDeps()) {
     const replaceIdentity = c.req.header("X-Replace-Identity");
     let existing: Agent | undefined;
     if (replaceIdentity) {
-      existing = store.getAgent(replaceIdentity);
+      existing = await store.getAgent(replaceIdentity);
       if (!existing || existing.status === "dead") {
         return c.json(
           { error: "cannot_replace_identity" },
@@ -158,7 +158,7 @@ export function createApp(deps: AppDeps = defaultDeps()) {
     }
 
     // Stage 1 — fast vet
-    const s1 = await stage1FastVet(contribution, store.corpusForDedup(), verifierAdapter);
+    const s1 = await stage1FastVet(contribution, await store.corpusForDedup(), verifierAdapter);
     if (!s1.passed) {
       return c.json(
         {
@@ -198,11 +198,11 @@ export function createApp(deps: AppDeps = defaultDeps()) {
           bootstrapFingerprint: fingerprint,
         };
     if (existing) {
-      store.updateAgent(agentId, agent);
+      await store.updateAgent(agentId, agent);
     } else {
-      store.createAgent(agent);
+      await store.createAgent(agent);
     }
-    store.appendLedger({
+    await store.appendLedger({
       id: ulid(),
       agentId,
       delta: CREDITS.bootstrapTrial,
@@ -229,7 +229,7 @@ export function createApp(deps: AppDeps = defaultDeps()) {
       outcomes: [],
       published: false,
     };
-    store.createArtifact(artifact);
+    await store.createArtifact(artifact);
 
     // Job + queued stage 2
     const jobId = ulid();
@@ -241,7 +241,7 @@ export function createApp(deps: AppDeps = defaultDeps()) {
       status: "pending",
       createdAt: now(),
     };
-    store.createJob(job);
+    await store.createJob(job);
 
     scheduleStage2(async () => {
       await runStage2(deps, jobId, contribution, s1.preliminaryScore);
@@ -289,7 +289,7 @@ export function createApp(deps: AppDeps = defaultDeps()) {
       ? { stack: stackParam.split(","), versions: {}, tags: [] }
       : undefined;
     const limit = Number.parseInt(c.req.query("limit") ?? "10", 10);
-    const results = search(store.allArtifacts(), {
+    const results = search(await store.allArtifacts(), {
       intent,
       context: ctx,
       limit: Number.isFinite(limit) ? limit : 10,
@@ -320,7 +320,7 @@ export function createApp(deps: AppDeps = defaultDeps()) {
       );
     }
     const id = c.req.param("id");
-    const art = store.getArtifact(id);
+    const art = await store.getArtifact(id);
     if (!art) return c.json({ error: "not_found" }, 404);
 
     // Probationary agents can only fetch published artifacts (they can read
@@ -331,7 +331,7 @@ export function createApp(deps: AppDeps = defaultDeps()) {
     }
 
     // Cost
-    const r = credit(
+    const r = await credit(
       store,
       agent.id,
       -CREDITS.fullPayloadCost,
@@ -402,7 +402,7 @@ export function createApp(deps: AppDeps = defaultDeps()) {
     }
     const contribution = parsed.data;
 
-    const s1 = await stage1FastVet(contribution, store.corpusForDedup(), verifierAdapter);
+    const s1 = await stage1FastVet(contribution, await store.corpusForDedup(), verifierAdapter);
     if (!s1.passed) {
       return c.json(
         { status: "rejected_stage1", reason: s1.reason, details: s1.details },
@@ -428,10 +428,10 @@ export function createApp(deps: AppDeps = defaultDeps()) {
       outcomes: [],
       published: false,
     };
-    store.createArtifact(artifact);
+    await store.createArtifact(artifact);
 
     const jobId = ulid();
-    store.createJob({
+    await store.createJob({
       id: jobId,
       agentId: agent.id,
       artifactId,
@@ -465,10 +465,10 @@ export function createApp(deps: AppDeps = defaultDeps()) {
     if (!body.artifactId || typeof body.helped !== "boolean") {
       return c.json({ error: "artifact_id_and_helped_required" }, 400);
     }
-    const art = store.getArtifact(body.artifactId);
+    const art = await store.getArtifact(body.artifactId);
     if (!art) return c.json({ error: "artifact_not_found" }, 404);
 
-    store.appendOutcome(art.id, {
+    await store.appendOutcome(art.id, {
       agentId: agent.id,
       helped: body.helped,
       ts: now(),
@@ -476,13 +476,13 @@ export function createApp(deps: AppDeps = defaultDeps()) {
     });
 
     // Pay for honesty (partial refund regardless of helped/not-helped)
-    credit(store, agent.id, CREDITS.outcomeRefund, "outcome_report_refund",
+    await credit(store, agent.id, CREDITS.outcomeRefund, "outcome_report_refund",
       art.id);
 
     // Royalty drip to the original submitter if helped:true
     if (body.helped && art.provenance.submitterAgentId !== agent.id) {
       const royalty = CREDITS.royaltyMin; // v0: floor; later: scale with reporter reputation
-      credit(
+      await credit(
         store,
         art.provenance.submitterAgentId,
         royalty,
@@ -495,11 +495,11 @@ export function createApp(deps: AppDeps = defaultDeps()) {
     // artifact's layer-2 public page becomes fully visible (with publicPreview).
     // Re-read the artifact since appendOutcome mutated it.
     if (body.helped) {
-      const updated = store.getArtifact(art.id);
+      const updated = await store.getArtifact(art.id);
       if (updated && !updated.indexedAt && updated.published) {
         const helpedCount = updated.outcomes.filter((o) => o.helped).length;
         if (helpedCount >= INDEX_THRESHOLDS.helpedOutcomesForFullIndex) {
-          store.updateArtifact(art.id, { indexedAt: now() });
+          await store.updateArtifact(art.id, { indexedAt: now() });
         }
       }
     }
@@ -520,7 +520,7 @@ export function createApp(deps: AppDeps = defaultDeps()) {
   // Essays are always indexed at publish time (no outcome gate).
 
   app.get("/v1/public/artifacts/:id", async (c) => {
-    const art = store.getArtifact(c.req.param("id"));
+    const art = await store.getArtifact(c.req.param("id"));
     if (!art || !art.published) {
       return c.json({ error: "not_found" }, 404);
     }
@@ -571,7 +571,7 @@ export function createApp(deps: AppDeps = defaultDeps()) {
   app.get("/v1/jobs/:id", async (c) => {
     const agent = await authed(c);
     if (!agent) return unauth(c);
-    const job = store.getJob(c.req.param("id"));
+    const job = await store.getJob(c.req.param("id"));
     if (!job) return c.json({ error: "not_found" }, 404);
     if (job.agentId !== agent.id) return c.json({ error: "not_found" }, 404);
     return c.json(job);
@@ -583,7 +583,7 @@ export function createApp(deps: AppDeps = defaultDeps()) {
     const agent = await authed(c);
     if (!agent) return unauth(c);
     const { token, tokenHash } = mintToken();
-    store.updateAgent(agent.id, { tokenHash });
+    await store.updateAgent(agent.id, { tokenHash });
     return c.json({ token, agentId: agent.id });
   });
 
@@ -599,34 +599,34 @@ async function runStage2(
   preliminaryScore: number,
 ): Promise<void> {
   const { store, now, verifierAdapter } = deps;
-  const job = store.getJob(jobId);
+  const job = await store.getJob(jobId);
   if (!job) return;
-  const agent = store.getAgent(job.agentId);
+  const agent = await store.getAgent(job.agentId);
   if (!agent) return;
-  const artifact = store.getArtifact(job.artifactId);
+  const artifact = await store.getArtifact(job.artifactId);
   if (!artifact) return;
 
   const result = await stage2FullVerification(contribution, preliminaryScore, verifierAdapter);
 
   if (result.passed) {
     // Mint reward, publish artifact, mark agent active.
-    credit(
+    await credit(
       store,
       agent.id,
       result.contributionReward,
       "stage2_pass_reward",
       artifact.id,
     );
-    store.updateAgent(agent.id, {
+    await store.updateAgent(agent.id, {
       status: "active",
       contributionsAccepted: agent.contributionsAccepted + 1,
       consecutiveRejections: 0,
     });
-    store.updateArtifact(artifact.id, {
+    await store.updateArtifact(artifact.id, {
       verification: result.record,
       published: true,
     });
-    store.updateJob(jobId, {
+    await store.updateJob(jobId, {
       status: "passed",
       resolvedAt: now(),
     });
@@ -637,19 +637,19 @@ async function runStage2(
   // Claw back trial credits if any remain unspent.
   if (agent.credits > 0) {
     const clawback = -agent.credits;
-    credit(store, agent.id, clawback, "stage2_fail_clawback", artifact.id);
+    await credit(store, agent.id, clawback, "stage2_fail_clawback", artifact.id);
   }
   const newConsecutive = agent.consecutiveRejections + 1;
   const dead = newConsecutive >= 2;
-  store.updateAgent(agent.id, {
+  await store.updateAgent(agent.id, {
     status: dead ? "dead" : "suspended",
     consecutiveRejections: newConsecutive,
   });
-  store.updateArtifact(artifact.id, {
+  await store.updateArtifact(artifact.id, {
     verification: result.record,
     published: false,
   });
-  store.updateJob(jobId, {
+  await store.updateJob(jobId, {
     status: "failed",
     reason: result.rejection?.reason,
     details: result.rejection?.details,

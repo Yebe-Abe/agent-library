@@ -1,9 +1,10 @@
 /**
- * In-memory store for the v0 API. Swap to Postgres + pgvector when we ship.
+ * Store interface — async because Postgres is async, and the in-memory impl
+ * trivially wraps in Promise.resolve(). Two implementations:
+ *   - createMemoryStore()   — fast, for tests + local dev sans DB
+ *   - createPostgresStore() — the production path (see ./db/postgres-store.ts)
  *
- * Keep the interface narrow on purpose — every method here is something we'll
- * have to translate to SQL later. If you're tempted to add a method that
- * loops through every record, it should probably be an index.
+ * Both implement this interface. Callers should never care which is in use.
  */
 
 import type {
@@ -16,32 +17,30 @@ import type {
 
 export interface Store {
   // agents
-  createAgent(agent: Agent): void;
-  getAgent(id: string): Agent | undefined;
-  getAgentByTokenHash(tokenHash: string): Agent | undefined;
-  updateAgent(id: string, patch: Partial<Agent>): Agent | undefined;
+  createAgent(agent: Agent): Promise<void>;
+  getAgent(id: string): Promise<Agent | undefined>;
+  getAgentByTokenHash(tokenHash: string): Promise<Agent | undefined>;
+  updateAgent(id: string, patch: Partial<Agent>): Promise<Agent | undefined>;
 
   // artifacts
-  createArtifact(a: Artifact): void;
-  getArtifact(id: string): Artifact | undefined;
-  updateArtifact(id: string, patch: Partial<Artifact>): Artifact | undefined;
-  /** all artifacts; v0 search filters in memory */
-  allArtifacts(): Artifact[];
-  /** corpus used for dedup — title + summary + payload only */
-  corpusForDedup(): Pick<Artifact, "id" | "title" | "summary" | "payload">[];
+  createArtifact(a: Artifact): Promise<void>;
+  getArtifact(id: string): Promise<Artifact | undefined>;
+  updateArtifact(id: string, patch: Partial<Artifact>): Promise<Artifact | undefined>;
+  allArtifacts(): Promise<Artifact[]>;
+  corpusForDedup(): Promise<Pick<Artifact, "id" | "title" | "summary" | "payload">[]>;
 
   // jobs
-  createJob(job: Job): void;
-  getJob(id: string): Job | undefined;
-  updateJob(id: string, patch: Partial<Job>): Job | undefined;
-  allJobs(filter?: { kind?: Job["kind"]; status?: Job["status"] }): Job[];
+  createJob(job: Job): Promise<void>;
+  getJob(id: string): Promise<Job | undefined>;
+  updateJob(id: string, patch: Partial<Job>): Promise<Job | undefined>;
+  allJobs(filter?: { kind?: Job["kind"]; status?: Job["status"] }): Promise<Job[]>;
 
   // outcomes
-  appendOutcome(artifactId: string, outcome: Outcome): void;
+  appendOutcome(artifactId: string, outcome: Outcome): Promise<void>;
 
   // credit ledger
-  appendLedger(entry: CreditLedgerEntry): void;
-  ledgerForAgent(agentId: string): CreditLedgerEntry[];
+  appendLedger(entry: CreditLedgerEntry): Promise<void>;
+  ledgerForAgent(agentId: string): Promise<CreditLedgerEntry[]>;
 }
 
 export function createMemoryStore(): Store {
@@ -52,21 +51,20 @@ export function createMemoryStore(): Store {
   const ledger: CreditLedgerEntry[] = [];
 
   return {
-    createAgent(agent) {
+    async createAgent(agent) {
       agents.set(agent.id, agent);
       agentsByToken.set(agent.tokenHash, agent.id);
     },
-    getAgent(id) {
+    async getAgent(id) {
       return agents.get(id);
     },
-    getAgentByTokenHash(tokenHash) {
+    async getAgentByTokenHash(tokenHash) {
       const id = agentsByToken.get(tokenHash);
       return id ? agents.get(id) : undefined;
     },
-    updateAgent(id, patch) {
+    async updateAgent(id, patch) {
       const cur = agents.get(id);
       if (!cur) return undefined;
-      // if token hash changes (rotation), update the index
       if (patch.tokenHash && patch.tokenHash !== cur.tokenHash) {
         agentsByToken.delete(cur.tokenHash);
         agentsByToken.set(patch.tokenHash, id);
@@ -76,23 +74,23 @@ export function createMemoryStore(): Store {
       return next;
     },
 
-    createArtifact(a) {
+    async createArtifact(a) {
       artifacts.set(a.id, a);
     },
-    getArtifact(id) {
+    async getArtifact(id) {
       return artifacts.get(id);
     },
-    updateArtifact(id, patch) {
+    async updateArtifact(id, patch) {
       const cur = artifacts.get(id);
       if (!cur) return undefined;
       const next = { ...cur, ...patch };
       artifacts.set(id, next);
       return next;
     },
-    allArtifacts() {
+    async allArtifacts() {
       return Array.from(artifacts.values());
     },
-    corpusForDedup() {
+    async corpusForDedup() {
       return Array.from(artifacts.values()).map((a) => ({
         id: a.id,
         title: a.title,
@@ -101,27 +99,27 @@ export function createMemoryStore(): Store {
       }));
     },
 
-    createJob(job) {
+    async createJob(job) {
       jobs.set(job.id, job);
     },
-    getJob(id) {
+    async getJob(id) {
       return jobs.get(id);
     },
-    updateJob(id, patch) {
+    async updateJob(id, patch) {
       const cur = jobs.get(id);
       if (!cur) return undefined;
       const next = { ...cur, ...patch };
       jobs.set(id, next);
       return next;
     },
-    allJobs(filter) {
+    async allJobs(filter) {
       let xs = Array.from(jobs.values());
       if (filter?.kind) xs = xs.filter((j) => j.kind === filter.kind);
       if (filter?.status) xs = xs.filter((j) => j.status === filter.status);
       return xs;
     },
 
-    appendOutcome(artifactId, outcome) {
+    async appendOutcome(artifactId, outcome) {
       const a = artifacts.get(artifactId);
       if (!a) return;
       artifacts.set(artifactId, {
@@ -130,10 +128,10 @@ export function createMemoryStore(): Store {
       });
     },
 
-    appendLedger(entry) {
+    async appendLedger(entry) {
       ledger.push(entry);
     },
-    ledgerForAgent(agentId) {
+    async ledgerForAgent(agentId) {
       return ledger.filter((e) => e.agentId === agentId);
     },
   };

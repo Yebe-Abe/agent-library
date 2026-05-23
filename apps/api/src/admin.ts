@@ -60,9 +60,9 @@ export function mountAdmin(app: Hono, deps: AdminDeps): void {
     if (ok === "disabled") return disabled(c);
     if (!ok) return unauthorized(c);
 
-    ensureScribeAgent(store, now);
+    await ensureScribeAgent(store, now);
     const scribe = new Scribe();
-    const drafts = await scribe.draftEssays(store.allArtifacts());
+    const drafts = await scribe.draftEssays(await store.allArtifacts());
 
     const queued: Array<{ jobId: string; artifactId: string; title: string }> = [];
     for (const draft of drafts) {
@@ -85,7 +85,7 @@ export function mountAdmin(app: Hono, deps: AdminDeps): void {
         outcomes: [],
         published: false,
       };
-      store.createArtifact(artifact);
+      await store.createArtifact(artifact);
 
       const jobId = ulid();
       const job: Job = {
@@ -98,7 +98,7 @@ export function mountAdmin(app: Hono, deps: AdminDeps): void {
         details: JSON.stringify({ citations: draft.citations }),
         createdAt: now(),
       };
-      store.createJob(job);
+      await store.createJob(job);
       queued.push({ jobId, artifactId, title: contribution.title });
     }
 
@@ -106,15 +106,15 @@ export function mountAdmin(app: Hono, deps: AdminDeps): void {
   });
 
   // ── GET /v1/admin/drafts ─────────────────────────────────────────────────
-  app.get("/v1/admin/drafts", (c) => {
+  app.get("/v1/admin/drafts", async (c) => {
     const ok = adminAuthed(c);
     if (ok === "disabled") return disabled(c);
     if (!ok) return unauthorized(c);
 
-    const pending = store
-      .allJobs({ kind: "scribe_draft", status: "pending" })
-      .map((j) => {
-        const art = store.getArtifact(j.artifactId);
+    const jobs = await store.allJobs({ kind: "scribe_draft", status: "pending" });
+    const pending = await Promise.all(
+      jobs.map(async (j) => {
+        const art = await store.getArtifact(j.artifactId);
         return {
           jobId: j.id,
           createdAt: j.createdAt,
@@ -127,7 +127,8 @@ export function mountAdmin(app: Hono, deps: AdminDeps): void {
           },
           citations: parseCitations(j.details),
         };
-      });
+      }),
+    );
     return c.json({ pending });
   });
 
@@ -137,17 +138,17 @@ export function mountAdmin(app: Hono, deps: AdminDeps): void {
     if (ok === "disabled") return disabled(c);
     if (!ok) return unauthorized(c);
 
-    const job = store.getJob(c.req.param("jobId"));
+    const job = await store.getJob(c.req.param("jobId"));
     if (!job || job.kind !== "scribe_draft" || job.status !== "pending") {
       return c.json({ error: "not_found_or_resolved" }, 404);
     }
-    const art = store.getArtifact(job.artifactId);
+    const art = await store.getArtifact(job.artifactId);
     if (!art) return c.json({ error: "artifact_missing" }, 500);
 
     // Essays are auto-indexed at publish time (no outcome gate — they're
     // already the curated layer).
     const ts = now();
-    store.updateArtifact(art.id, {
+    await store.updateArtifact(art.id, {
       published: true,
       indexedAt: ts,
       verification: {
@@ -156,28 +157,28 @@ export function mountAdmin(app: Hono, deps: AdminDeps): void {
         verifiedAt: ts,
       },
     });
-    store.updateJob(job.id, { status: "approved", resolvedAt: ts });
+    await store.updateJob(job.id, { status: "approved", resolvedAt: ts });
     return c.json({ ok: true, artifactId: art.id });
   });
 
   // ── POST /v1/admin/drafts/:jobId/reject ──────────────────────────────────
-  app.post("/v1/admin/drafts/:jobId/reject", (c) => {
+  app.post("/v1/admin/drafts/:jobId/reject", async (c) => {
     const ok = adminAuthed(c);
     if (ok === "disabled") return disabled(c);
     if (!ok) return unauthorized(c);
 
-    const job = store.getJob(c.req.param("jobId"));
+    const job = await store.getJob(c.req.param("jobId"));
     if (!job || job.kind !== "scribe_draft" || job.status !== "pending") {
       return c.json({ error: "not_found_or_resolved" }, 404);
     }
     const ts = now();
-    store.updateJob(job.id, { status: "rejected", resolvedAt: ts });
+    await store.updateJob(job.id, { status: "rejected", resolvedAt: ts });
     // Artifact stays unpublished — never indexed, won't appear anywhere.
     return c.json({ ok: true });
   });
 
   // ── GET /admin/drafts  (HTML) ────────────────────────────────────────────
-  app.get("/admin/drafts", (c) => {
+  app.get("/admin/drafts", async (c) => {
     const ok = adminAuthed(c);
     if (ok === "disabled") {
       c.status(503);
@@ -194,16 +195,16 @@ export function mountAdmin(app: Hono, deps: AdminDeps): void {
       );
     }
 
-    const pending = store.allJobs({ kind: "scribe_draft", status: "pending" });
+    const pending = await store.allJobs({ kind: "scribe_draft", status: "pending" });
     c.header("Content-Type", "text/html; charset=utf-8");
-    return c.body(renderDraftsPage(store, pending));
+    return c.body(await renderDraftsPage(store, pending));
   });
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-function ensureScribeAgent(store: Store, now: () => string): Agent {
-  const existing = store.getAgent(SCRIBE_AGENT_ID);
+async function ensureScribeAgent(store: Store, now: () => string): Promise<Agent> {
+  const existing = await store.getAgent(SCRIBE_AGENT_ID);
   if (existing) return existing;
   const agent: Agent = {
     id: SCRIBE_AGENT_ID,
@@ -216,7 +217,7 @@ function ensureScribeAgent(store: Store, now: () => string): Agent {
     reputation: 0,
     createdAt: now(),
   };
-  store.createAgent(agent);
+  await store.createAgent(agent);
   return agent;
 }
 
@@ -241,10 +242,10 @@ function parseCitations(details: string | undefined): string[] {
   }
 }
 
-function renderDraftsPage(store: Store, pending: Job[]): string {
-  const items = pending
-    .map((j) => {
-      const art = store.getArtifact(j.artifactId);
+async function renderDraftsPage(store: Store, pending: Job[]): Promise<string> {
+  const itemArr = await Promise.all(
+    pending.map(async (j) => {
+      const art = await store.getArtifact(j.artifactId);
       if (!art) return "";
       const escapedPayload = escapeHtml(art.payload);
       const citations = parseCitations(j.details)
@@ -269,8 +270,9 @@ function renderDraftsPage(store: Store, pending: Job[]): string {
     </form>
   </div>
 </article>`;
-    })
-    .join("\n");
+    }),
+  );
+  const items = itemArr.join("\n");
 
   return `<!doctype html>
 <html lang="en">

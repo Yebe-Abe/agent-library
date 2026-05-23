@@ -8,14 +8,14 @@ import { ulid } from "ulid";
 import type { CreditLedgerEntry } from "@commons/schema";
 import type { Store } from "./store.js";
 
-export function credit(
+export async function credit(
   store: Store,
   agentId: string,
   delta: number,
   reason: CreditLedgerEntry["reason"],
   artifactId?: string,
-): { newBalance: number } | { error: string } {
-  const agent = store.getAgent(agentId);
+): Promise<{ newBalance: number } | { error: string }> {
+  const agent = await store.getAgent(agentId);
   if (!agent) return { error: "agent_not_found" };
 
   const next = agent.credits + delta;
@@ -23,8 +23,8 @@ export function credit(
     return { error: "insufficient_credits" };
   }
 
-  store.updateAgent(agentId, { credits: next });
-  store.appendLedger({
+  await store.updateAgent(agentId, { credits: next });
+  await store.appendLedger({
     id: ulid(),
     agentId,
     delta,
