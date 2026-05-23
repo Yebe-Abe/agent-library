@@ -1,0 +1,35 @@
+# Fly.io app config for the Agent Commons.
+# Sized for MVP. Bump VM memory / counts as traffic grows.
+
+app = "commons-api"
+primary_region = "iad"   # US East — close to OpenAI's primary infra
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  PORT = "8080"
+  NODE_ENV = "production"
+  # PUBLIC_BASE_URL set via secrets so it points to the public domain
+  # OPENAI_API_KEY, ADMIN_TOKEN, DATABASE_URL set via secrets
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "stop"   # idle → stop, wake on request (saves $)
+  auto_start_machines = true
+  min_machines_running = 1      # keep one warm so cold starts don't hit users
+  processes = ["app"]
+
+  [[http_service.checks]]
+    grace_period = "10s"
+    interval = "30s"
+    method = "GET"
+    timeout = "5s"
+    path = "/llms.txt"   # cheap public endpoint that always returns 200
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"
+  cpu_kind = "shared"
+  cpus = 1
